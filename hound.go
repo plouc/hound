@@ -25,9 +25,7 @@ const (
 	confWrapper  = "[fg-237]>[reset] [fg-94]%s[reset] [fg-87 bold]%s[reset]"
 	confFilePath = ".houndfile"
 
-	useGithub = true
-	useGitlab = true
-	useJira   = true
+	eventTemplate = "[bg-87 fg-16] %s [reset][fg-87 bg-178]⮀[reset][bg-178 fg-16] %- 6s [reset][fg-178]⮀[reset] [fg-157]%s"
 )
 
 type HoundEvent struct {
@@ -73,6 +71,96 @@ func ask(s *bufio.Scanner, question string) string {
 	return v
 }
 
+var command      string
+var githubUser   string
+var jiraUser     string
+var jiraFeedUser string
+
+func init() {
+	const (
+		defaultGithubUser   = ""
+		githubUserUsage     = "the github user"
+		defaultJiraUser     = ""
+		jiraUserUsage       = "the jira user name"
+		defaultJiraFeedUser = ""
+		jiraFeedUserUsage   = "the jira user name to filter activity feed"
+		defaultCommand      = "history"
+		commandUsage        = "the command to run, available: setup, history"
+	)
+
+	flag.StringVar(&command, "command", defaultCommand, commandUsage)
+	flag.StringVar(&command, "c",       defaultCommand, commandUsage+" (shorthand)")
+
+	flag.StringVar(&githubUser, "github_user", defaultGithubUser, githubUserUsage)
+	flag.StringVar(&githubUser, "ghu",         defaultGithubUser, githubUserUsage+" (shorthand)")
+
+	flag.StringVar(&jiraUser, "jira_user", defaultJiraUser, jiraUserUsage)
+	flag.StringVar(&jiraUser, "ju",        defaultJiraUser, jiraUserUsage+" (shorthand)")
+
+	flag.StringVar(&jiraFeedUser, "jira_feed_user", defaultJiraFeedUser, jiraFeedUserUsage)
+	flag.StringVar(&jiraFeedUser, "jfu",            defaultJiraFeedUser, jiraFeedUserUsage+" (shorthand)")
+}
+
+type Config struct {
+	gitlabBaseUrl      string
+	gitlabApiPath      string
+	gitlabRepoFeedPath string
+	gitlabToken        string
+	jiraBaseUrl        string
+	jiraApiPath        string
+	jiraActivityPath   string
+}
+
+func checkConfig() *Config {
+	c, err := goconfig.ReadConfigFile(confFilePath)
+	if err != nil {
+		fmt.Println(sgr.MustParseln("[fg-94]Config file doesn't exists, please run[reset]\n[fg-237]>[reset] [fg-157 bold]./hound setup[reset]"))
+		os.Exit(0)
+	}
+
+	// fetch gitlab config
+	gitlabBaseUrl      := getConfValue(c, "gitlab", "baseUrl", "gitlab base url")
+	gitlabApiPath      := getConfValue(c, "gitlab", "apiPath", "gitlab api path")
+	gitlabRepoFeedPath := getConfValue(c, "gitlab", "repoFeedPath", "gitlab repository feed path")
+	gitlabToken        := getConfValue(c, "gitlab", "token", "gitlab token")
+
+	// fetch jira config
+	jiraBaseUrl      := getConfValue(c, "jira", "baseUrl", "jira base url")
+	jiraApiPath      := getConfValue(c, "jira", "apiPath", "jira api path")
+	jiraActivityPath := getConfValue(c, "jira", "activityPath", "jira activity path")
+
+	return &Config{
+		gitlabBaseUrl:      gitlabBaseUrl,
+		gitlabApiPath:      gitlabApiPath,
+		gitlabRepoFeedPath: gitlabRepoFeedPath,
+		gitlabToken:        gitlabToken,
+		jiraBaseUrl:        jiraBaseUrl,
+		jiraApiPath:        jiraApiPath,
+		jiraActivityPath:   jiraActivityPath,
+	}
+}
+
+func main() {
+	fmt.Print(sgr.MustParseln(welcomeMsg))
+	
+	startedAt := time.Now()
+	defer func() {
+		fmt.Printf(sgr.MustParseln("\n[fg-237]> processed in [fg-157]%v"), time.Now().Sub(startedAt))
+	}()
+
+	flag.Parse()
+
+	switch command {
+	default:
+		fmt.Println("No command defined, available commands: setup, history")
+	case "setup":
+		setup()
+	case "history":
+		config := checkConfig()
+		history(config)
+	}	
+}
+
 // Interactive command configuration
 func setup() {
 	fmt.Println(sgr.MustParse("[fg-87]hound interactive setup"))
@@ -109,116 +197,46 @@ func setup() {
 	fmt.Println(sgr.MustParse("[fg-87]Config file successfully created!\n"))
 }
 
-var ghu string
-
-func init() {
-	const (
-		defaultGithubUser = "plouc"
-		ghuUsage          = "the github user"
-	)
-	flag.StringVar(&ghu, "github_user", defaultGithubUser, ghuUsage)
-	flag.StringVar(&ghu, "ghu", defaultGithubUser, ghuUsage+" (shorthand)")
-
-	fmt.Println("CALLED")
-}
-
-func main() {
-
-	fmt.Print(sgr.MustParseln(welcomeMsg))
-	
-	startedAt := time.Now()
-
-	flag.Parse()
-
-	cmd := flag.Arg(0)
-	switch cmd {
-	case "setup":
-		setup()
-	}
-
-	c, err := goconfig.ReadConfigFile(confFilePath)
-	if err != nil {
-		fmt.Println(sgr.MustParseln("[fg-94]Config file doesn't exists, please run[reset]\n[fg-237]>[reset] [fg-157 bold]./hound setup[reset]"))
-		os.Exit(0)
-	}
-
-	// fetch github config
-	githubUser := getConfValue(c, "github", "user", "github user")
-
-	// fetch gitlab config
-	gitlabBaseUrl      := getConfValue(c, "gitlab", "baseUrl", "gitlab base url")
-	gitlabApiPath      := getConfValue(c, "gitlab", "apiPath", "gitlab api path")
-	gitlabRepoFeedPath := getConfValue(c, "gitlab", "repoFeedPath", "gitlab repository feed path")
-	gitlabToken        := getConfValue(c, "gitlab", "token", "gitlab token")
-
-	// fetch jira config
-	jiraBaseUrl      := getConfValue(c, "jira", "baseUrl", "jira base url")
-	jiraApiPath      := getConfValue(c, "jira", "apiPath", "jira api path")
-	jiraUser         := getConfValue(c, "jira", "user", "jira user")
-	jiraActivityPath := getConfValue(c, "jira", "activityPath", "jira activity path")
-	jiraActivityUser := getConfValue(c, "jira", "activityUser", "jira activity user")
-
+// History
+func history(c *Config) {
 	github := gogithub.NewGithub()
-	gitlab := gogitlab.NewGitlab(gitlabBaseUrl, gitlabApiPath, gitlabRepoFeedPath, gitlabToken)
-	jira := gojira.NewJira(jiraBaseUrl, jiraApiPath, jiraActivityPath)
+	gitlab := gogitlab.NewGitlab(c.gitlabBaseUrl, c.gitlabApiPath, c.gitlabRepoFeedPath, c.gitlabToken)
+	jira   := gojira.NewJira(c.jiraBaseUrl, c.jiraApiPath, c.jiraActivityPath)
 
-	fmt.Println(ghu)
-
-	githubUserEvents := github.UserPerformedEvents(ghu)
-
-	//os.Exit(0)
-
+	githubUserEvents := github.UserPerformedEvents(githubUser)
 	gitlabCommits    := gitlab.RepoCommits("56")
 	gitlabActivity   := gitlab.RepoActivityFeed()
 	jiraIssues       := jira.IssuesAssignedTo(jiraUser, 30, 0)
-	jiraActivity     := jira.UserActivity(jiraActivityUser)
+	jiraActivity     := jira.UserActivity(jiraFeedUser)
 
-	events := make([]*HoundEvent, len(githubUserEvents)+len(jiraIssues.Issues)+len(jiraActivity.Entry)+len(gitlabCommits)+len(gitlabActivity.Entry))
+	events := make([]*HoundEvent, len(githubUserEvents)   + len(jiraIssues.Issues) +
+								  len(jiraActivity.Entry) + len(gitlabCommits) +
+								  len(gitlabActivity.Entry))
 
 	i := 0
 
 	for _, commit := range gitlabCommits {
-		events[i] = &HoundEvent{
-			Type:    "gitlab",
-			On:      commit.CreatedAt,
-			Payload: commit,
-		}
+		events[i] = &HoundEvent{"gitlab", commit.CreatedAt, commit}
 		i = i + 1
 	}
 
 	for _, entry := range gitlabActivity.Entry {
-		events[i] = &HoundEvent{
-			Type:    "gitlab",
-			On:      entry.Updated,
-			Payload: entry,
-		}
+		events[i] = &HoundEvent{"gitlab", entry.Updated, entry}
 		i = i + 1
 	}
 
 	for _, event := range githubUserEvents {
-		events[i] = &HoundEvent{
-			Type:    "github",
-			On:      event.CreatedAt,
-			Payload: event,
-		}
+		events[i] = &HoundEvent{"github", event.CreatedAt, event}
 		i = i + 1
 	}
 
 	for _, issue := range jiraIssues.Issues {
-		events[i] = &HoundEvent{
-			Type:    "jira",
-			On:      issue.CreatedAt,
-			Payload: issue,
-		}
+		events[i] = &HoundEvent{"jira", issue.CreatedAt, issue}
 		i = i + 1
 	}
 
 	for _, entry := range jiraActivity.Entry {
-		events[i] = &HoundEvent{
-			Type:    "jira",
-			On:      entry.Updated,
-			Payload: entry,
-		}
+		events[i] = &HoundEvent{"jira", entry.Updated, entry}
 		i = i + 1
 	}
 
@@ -240,33 +258,31 @@ func main() {
 			fmt.Printf(sgr.MustParseln("[bg-94 fg-184] %- 80s "), dateStr)
 			currentDay = &event.On
 		}
+
 		switch T := event.Payload.(type) {
 		default:
 			fmt.Printf("unexpected type %T", T)
+
 		case *gogithub.Event:
 			payload := event.Payload.(*gogithub.Event)
-			fmt.Printf(sgr.MustParseln("[bg-87 fg-16] %s [reset][fg-87 bg-178]⮀[reset][bg-178 fg-16] %- 6s [reset][fg-178]⮀[reset] [fg-157]%s"),
-				event.On.Format("15:04"), event.Type, payload.Message(ghu))
+			fmt.Printf(sgr.MustParseln(eventTemplate), event.On.Format("15:04"), event.Type, payload.Message(""))
+
 		case *gojira.Issue:
 			payload := event.Payload.(*gojira.Issue)
-			fmt.Printf(sgr.MustParseln("[bg-87 fg-16] %s [reset][fg-87 bg-178]⮀[reset][bg-178 fg-16] %- 6s [reset][fg-178]⮀[reset] [fg-157]%s - %s"),
-				event.On.Format("15:04"), event.Type, payload.Key, payload.Fields.Summary)
+			fmt.Printf(sgr.MustParseln(eventTemplate), event.On.Format("15:04"), event.Type, payload.Key+" - "+payload.Fields.Summary)
+
 		case *gojira.ActivityItem:
 			payload := event.Payload.(*gojira.ActivityItem)
-			fmt.Printf(sgr.MustParseln("[bg-87 fg-16] %s [reset][fg-87 bg-178]⮀[reset][bg-178 fg-16] %- 6s [reset][fg-178]⮀[reset] [fg-157]%s"),
-				event.On.Format("15:04"), event.Type, re.ReplaceAllString(sanitize.HTML(payload.Title), " "))
+			fmt.Printf(sgr.MustParseln(eventTemplate), event.On.Format("15:04"), event.Type, re.ReplaceAllString(sanitize.HTML(payload.Title), " "))
+
 		case *gogitlab.Commit:
 			payload := event.Payload.(*gogitlab.Commit)
-			fmt.Printf(sgr.MustParseln("[bg-87 fg-16] %s [reset][fg-87 bg-178]⮀[reset][bg-178 fg-16] %- 6s [reset][fg-178]⮀[reset] [fg-157]%s - %s by [bold]%s"),
-				event.On.Format("15:04"), event.Type, payload.Short_Id, payload.Title, payload.Author_Name)
+			description := fmt.Sprintf(sgr.MustParse("%s - %s by [bold]%s"), payload.Short_Id, payload.Title, payload.Author_Name)
+			fmt.Printf(sgr.MustParseln(eventTemplate), event.On.Format("15:04"), event.Type, description)
+
 		case *gogitlab.FeedCommit:
 			payload := event.Payload.(*gogitlab.FeedCommit)
-			fmt.Printf(sgr.MustParseln("[bg-87 fg-16] %s [reset][fg-87 bg-178]⮀[reset][bg-178 fg-16] %- 6s [reset][fg-178]⮀[reset] [fg-157]%s"),
-				event.On.Format("15:04"), event.Type, payload.Title)
+			fmt.Printf(sgr.MustParseln(eventTemplate), event.On.Format("15:04"), event.Type, payload.Title)
 		}
-
 	}
-
-	endedAt := time.Now()
-	fmt.Printf(sgr.MustParseln("\n[fg-237]> processed in [fg-157]%v"), endedAt.Sub(startedAt))
 }
