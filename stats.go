@@ -1,10 +1,10 @@
 package hound
 
 import (
-	//"strconv"
+	"strconv"
 	"fmt"
 	"time"
-	//"github.com/foize/go.sgr"
+	"github.com/foize/go.sgr"
 )
 
 type StatItem struct {
@@ -79,30 +79,16 @@ func (h *Hound) getStats() []*Stat {
 	return stats
 }
 
-// History
+// Stats
 func (h *Hound) Stats() {
 
 	stats := h.getStats()
-	fmt.Printf("%+v", stats)
 
-	/*
-	if h.Config.Github.Active {
+	for _, stat := range stats {
 		fmt.Printf(sgr.MustParseln("[bg-94 fg-184] %- 80s "), "Github")
-		repos, err := h.Github.UserRepos(h.Config.Github.User)
-		if err == nil {
-			fmt.Printf(sgr.MustParseln("[bg-87 fg-16] %- 80s "), strconv.Itoa(len(repos)) + " repositories")
-			longestVal := 0
-			for _, repo := range repos {
-				if nameLen := len(repo.Name); nameLen > longestVal { longestVal = nameLen }
-			}
-			for _, repo := range repos {
-				fmt.Printf(sgr.MustParse(fmt.Sprintf("[bg-178 fg-16] %%-%ds [reset][fg-178]⮀", longestVal)), repo.Name)
-				if repo.Description != "" {
-					fmt.Printf(sgr.MustParse("[fg-157] %s"), repo.Description)
-				}
-				fmt.Println("")
-			}
+		fmt.Printf(sgr.MustParseln("[bg-87 fg-16] %- 80s "), strconv.Itoa(len(stat.Stats)) + " items")
+		for _, statItem := range stat.Stats {
+			fmt.Printf(sgr.MustParse("[bg-178 fg-16] %s [reset][fg-178]⮀[fg-157] %s\n"), statItem.Name, statItem.Description)
 		}
 	}
-	*/
 }
